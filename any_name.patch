@@ -1,12 +1,116 @@
-diff --git a/node_by_email.info.yml b/node_by_email.info.yml
-index 8dda91e..822b915 100644
---- a/node_by_email.info.yml
-+++ b/node_by_email.info.yml
-@@ -1,6 +1,6 @@
- name: 'Node By Email'
- type: module
--description: 'This module creates nodes by sending email'
-+description: 'This module creates nodes by sending email hello world'
- core: 8.x
- core_version_requirement: ^8 || ^9
- configure: node_by_email.node_by_email_config_form
+diff --git a/src/MidToNodeService.php b/src/MidToNodeService.php
+index 5c6116d..76bfb42 100644
+--- a/src/MidToNodeService.php
++++ b/src/MidToNodeService.php
+@@ -6,6 +6,8 @@ use Drupal\Core\Session\AccountProxyInterface;
+ use Drupal\Core\Entity\EntityTypeManagerInterface;
+ use Drupal\Core\Config\ConfigFactoryInterface;
+ use Drupal\node\Entity\Node;
++use Drupal\comment\Entity\Comment;
++
+ 
+ /**
+  * Class MidToNodeService.
+@@ -58,31 +60,84 @@ class MidToNodeService {
+    */
+   public function createNodeFromMid($mid = NULL) {
+     if ($mid) {
+-      $nodeByEmailConfig = $this->configFactory->getEditable('node_by_email.nodebyemailconfig');
++$nodeByEmailConfig = $this->configFactory->getEditable('node_by_email.nodebyemailconfig');
+       $emailHeader = $this->nodeByEmailImapConnection->getEmailHeader($mid, "html");
+       $subject = $emailHeader['subject'];
+       $body = $emailHeader['body'];
+-      $nodeTypes = array_keys($nodeByEmailConfig->get("node_types"));
+-      if (!empty($nodeTypes)) {
+-        foreach ($nodeTypes as $nodeType) {
+-          $node = Node::create([
+-            'type' => $nodeType,
+-            'title' => $subject,
+-            'body' => [
+-              'value' => $body,
+-            ],
+-            'uid' => $nodeByEmailConfig->get("author_uid"),
+-          ]);
+-          if ($nodeByEmailConfig->get("publishing_option")) {
+-            $node->setPublished();
++      if (strpos($subject, 'Re:') !== false) {
++        $subjectReply = substr($subject, 4);
++        if (isset($subjectReply) && !empty($subjectReply)) {
++          $query = \Drupal::database()->select('node_field_data', 'n');
++          $query->fields('n',['nid']);
++          $query->condition('n.title',$subjectReply);
++          $query->range(0, 1);
++          $nodeCheck = $query->execute()->fetchObject();
++          if(isset($nodeCheck) && !empty($nodeCheck)){
++            $node_id = $nodeCheck->nid;
++            $queryComment = \Drupal::database()->select('comment_entity_statistics', 'ces');
++            $queryComment->fields('ces',['field_name']);
++            $queryComment->condition('ces.entity_id',$node_id);
++            $queryComment->range(0, 1);
++            $commentEnabled = $queryComment->execute()->fetchObject();
++            if(isset($commentEnabled) && !empty($commentEnabled)){
++              $node = Node::load($node_id);
++              $commentname = $commentEnabled->field_name;
++              $comments = $node->get($commentname)->getValue();
++              if(isset($comments) && !empty($comments)){
++                if($comments[0]['status'] == 2){
++                  $commentField = \Drupal::entityTypeManager()->getStorage('field_storage_config')->load('node.'.$commentEnabled->field_name);
++                  $language = \Drupal::languageManager()->getCurrentLanguage()->getId();
++                  $body = preg_replace('/(^\w.+:\n)?(^>.*(\n|$))+/mi', '', $body);
++                  $body = preg_replace('/\nOn(.*?)wrote:(.*?)$/si',"",$body);
++                  $comment = Comment::create(array(
++                      'comment_type' => $commentField->get('type'),
++                      'langcode' => $language,
++                      'entity_id' => $node_id,
++                      'entity_type' => $node->getEntityTypeId(),
++                      'uid' =>  $nodeByEmailConfig->get("author_uid"),
++                      'subject' => $subjectReply,
++                      'status' => 1,
++                      'field_name' => $commentEnabled->field_name,
++                      'comment_body' => [
++                          'summary' => '',
++                          'value' => $body,
++                          'format' => 'basic_html',
++                      ],
++                  ));
++                  $comment->save();
++                  $this->nodeByEmailImapConnection->setUnseenMail($mid);
++                }else{
++                  \Drupal::messenger()->addError('Comments are not enabled for node:'. $node_id);
++                }
++              }
++            }else{
++              \Drupal::messenger()->addError('Comments are not enabled for node:'. $node_id);
++            }
+           }
+-          else {
+-            $node->setUnpublished();
++        }
++      }else{ 
++        $nodeTypes = array_keys($nodeByEmailConfig->get("node_types"));
++        if (!empty($nodeTypes)) {
++          foreach ($nodeTypes as $nodeType) {
++            $node = Node::create([
++              'type' => $nodeType,
++              'title' => $subject,
++              'body' => [
++                'value' => $body,
++              ],
++              'uid' => $nodeByEmailConfig->get("author_uid"),
++            ]);
++            if ($nodeByEmailConfig->get("publishing_option")) {
++              $node->setPublished();
++            }
++            else {
++              $node->setUnpublished();
++            }
++            $node->save();
+           }
+-          $node->save();
+         }
++        $this->nodeByEmailImapConnection->setUnseenMail($mid);
+       }
+-      $this->nodeByEmailImapConnection->setUnseenMail($mid);
+     }
+   }
+ 
