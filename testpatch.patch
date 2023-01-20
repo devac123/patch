@@ -1,0 +1,10 @@
+diff --git a/node_by_email.info.yml b/node_by_email.info.yml
+index 8dda91e..e679774 100644
+--- a/node_by_email.info.yml
++++ b/node_by_email.info.yml
+@@ -1,4 +1,4 @@
+-name: 'Node By Email'
++name: 'Node By Email sds'
+ type: module
+ description: 'This module creates nodes by sending email'
+ core: 8.x
